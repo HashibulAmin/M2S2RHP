@@ -1,0 +1,23 @@
+{
+  "tests": "8/8 passed",
+  "syntax": "all Python files compile",
+  "training_smoke_test": {
+    "status": "passed",
+    "configuration": "default Config, epochs=1",
+    "loss": 1.3229,
+    "bpr": 0.5713,
+    "situation_bce": 0.6924,
+    "adversary_ce": 1.5024,
+    "margin": 0.2651
+  },
+  "end_to_end_small_experiment": {
+    "status": "passed",
+    "test_recall_at_k": 0.8,
+    "test_ndcg_at_k": 0.6861352921,
+    "pairwise_auc": 0.8521739130,
+    "city_hit_rate": 0.9,
+    "cold_recall_at_k": 1.0,
+    "warm_recall_at_k": 0.7777777910
+  },
+  "note": "Synthetic-data validation only; not a claim of real-world or production performance."
+}

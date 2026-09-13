@@ -85,7 +85,8 @@ def init_params(key, cfg):
     n_sit = len(cfg.situations)
     return {
         "text_encoder": init_text_encoder(keys[0], cfg),
-        "reel_emb_v": init_embedding(keys[1], cfg.n_reels, cfg.d_model),
+        # Optional warm-item residual; content encoder remains the primary item path.
+        "reel_id_residual": init_embedding(keys[1], cfg.n_reels, cfg.d_model),
         "reel_music_emb": init_embedding(keys[2], cfg.n_reels, cfg.d_style),
         "edu_emb": init_embedding(keys[3], cfg.n_education, cfg.d_cat),
         "gender_emb": init_embedding(keys[4], cfg.n_gender, cfg.d_cat),
@@ -108,12 +109,17 @@ def _demographic_vector(params, ctx: Ctx, uid):
 
 
 def encode_all_reels(params, cfg, ctx: Ctx):
+    """Encode all reels from content features; no interaction history is required.
+
+    This is the item-cold-start path: a new reel can be represented before it has any
+    engagement simply from its caption/OCR/ASR-style token stream and visual features.
+    """
     return encode_reels(
         params["text_encoder"], cfg, ctx.reel_tokens, ctx.reel_token_mask, ctx.reel_visual
     )
 
 
-def user_representation(params, cfg, ctx: Ctx, uid, all_situation_probs):
+def user_representation(params, cfg, ctx: Ctx, uid, all_situation_probs, all_content_reprs):
     d_i = _demographic_vector(params, ctx, uid)
     p_i = ctx.user_behavior[uid]
     b_i = fair_gate_forward(params["fair_gate"], jnp.concatenate([d_i, p_i], axis=-1))
@@ -122,7 +128,7 @@ def user_representation(params, cfg, ctx: Ctx, uid, all_situation_probs):
     h_w = ctx.hist_weight[uid]
     h_day = ctx.hist_day[uid]
     h_mask = ctx.hist_mask[uid]
-    hist_v = embedding_lookup(params["reel_emb_v"], h_reel)
+    hist_v = all_content_reprs[h_reel] + params["reel_id_residual"][h_reel]
     hist_music = embedding_lookup(params["reel_music_emb"], h_reel)
     hist_situation = jnp.take(all_situation_probs, h_reel, axis=0)
 
@@ -140,8 +146,13 @@ def user_representation(params, cfg, ctx: Ctx, uid, all_situation_probs):
     return {"b_i": b_i, "e_interest": e_interest, "e_music": e_music, "s_i": s_i, "geo_proj": geo_proj, "gate": gate}
 
 
-def score_candidates(params, cfg, ctx, uid, rid, user_repr, all_situation_probs, gate_override=None):
-    v_r = embedding_lookup(params["reel_emb_v"], rid)
+def score_candidates(
+    params, cfg, ctx, uid, rid, user_repr, all_situation_probs, content_reprs, gate_override=None
+):
+    content_v = content_reprs[rid]
+    # Warm-item residual improves personalization when the reel has history, while
+    # content_v alone remains a valid representation for a brand-new reel.
+    v_r = content_v + params["reel_id_residual"][rid]
     situation_r = jnp.take(all_situation_probs, rid, axis=0)
     s_situation = cosine_sim(user_repr["s_i"], situation_r)
     s_city = city_match_score(ctx.user_city[uid], ctx.reel_city[rid], ctx.city_dist_km, cfg.city_eta, cfg.city_tau_km)
@@ -165,10 +176,14 @@ def score_candidates(params, cfg, ctx, uid, rid, user_repr, all_situation_probs,
 
 
 def forward_bpr_batch(params, cfg, ctx, uid, pos_rid, neg_rid):
-    _, situation_probs = encode_all_reels(params, cfg, ctx)
-    user_repr = user_representation(params, cfg, ctx, uid, situation_probs)
-    y_pos, pos_components = score_candidates(params, cfg, ctx, uid, pos_rid, user_repr, situation_probs)
-    y_neg, neg_components = score_candidates(params, cfg, ctx, uid, neg_rid, user_repr, situation_probs)
+    text_reprs, situation_probs = encode_all_reels(params, cfg, ctx)
+    user_repr = user_representation(params, cfg, ctx, uid, situation_probs, text_reprs)
+    y_pos, pos_components = score_candidates(
+        params, cfg, ctx, uid, pos_rid, user_repr, situation_probs, text_reprs
+    )
+    y_neg, neg_components = score_candidates(
+        params, cfg, ctx, uid, neg_rid, user_repr, situation_probs, text_reprs
+    )
     adversary_logits = adversary_forward(params["fair_gate"], user_repr["b_i"], y_pos)
     return {
         "y_pos": y_pos,
@@ -186,8 +201,12 @@ def score_user_candidates(params, cfg, ctx, uid: int, candidate_rids):
     """Deterministic serving score for a single user; no exploration side effects."""
     uid_arr = jnp.full((len(candidate_rids),), uid, dtype=jnp.int32)
     rid = jnp.asarray(candidate_rids, dtype=jnp.int32)
-    _, probs = encode_all_reels(params, cfg, ctx)
-    one_user = user_representation(params, cfg, ctx, jnp.asarray([uid], dtype=jnp.int32), probs)
+    text_reprs, probs = encode_all_reels(params, cfg, ctx)
+    one_user = user_representation(
+        params, cfg, ctx, jnp.asarray([uid], dtype=jnp.int32), probs, text_reprs
+    )
     expanded = {k: jnp.repeat(v, len(candidate_rids), axis=0) for k, v in one_user.items()}
-    scores, components = score_candidates(params, cfg, ctx, uid_arr, rid, expanded, probs)
+    scores, components = score_candidates(
+        params, cfg, ctx, uid_arr, rid, expanded, probs, text_reprs
+    )
     return scores, components, one_user["gate"][0]
