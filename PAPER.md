@@ -259,7 +259,7 @@ $$
 
 when the lyric encoder is projected into the life-situation space. This auxiliary diagnostic is optional; the implementation's primary ranking term is $S_{music}$.
 
-### 5.3 Life-Situation Classifier
+### 5.4 Life-Situation Classifier
 
 Let each reel expose the textual sequence
 
@@ -575,18 +575,20 @@ The transpose/dot-product formulation is explicit to avoid the dimensional ambig
 A fixed global weight vector assumes every user depends on the same evidence. M²S²-Rec therefore uses a five-way per-user gate:
 
 $$
-\boldsymbol{\alpha}_i = [\alpha_i,\beta_i,\gamma_i,\delta_i,\mu_i]
+\mathbf{a}_i = [\alpha_i,\beta_i,\gamma_i,\delta_i,\mu_i]
 =\mathrm{softmax}(\mathrm{MLP}_{\mathrm{gate}}(\mathbf{x}_i)).
 $$
 
 The final ranking score is:
 
 $$
-\hat{y}_{i,k}=\alpha_iS_{situation}(u_i,r_k)
-+\beta_iS_{city}(u_i,r_k)
-+\gamma_iS_{interest}(u_i,r_k)
-+\delta_iS_{geo}(u_i,r_k)
-+\mu_iS_{music}(u_i,r_k) + \xi S_{trend}(r_k).
+\begin{aligned}
+\hat{y}_{i,k} ={}& \alpha_i S_{situation}(u_i,r_k)
++ \beta_i S_{city}(u_i,r_k)
++ \gamma_i S_{interest}(u_i,r_k) \\n&+ \delta_i S_{geo}(u_i,r_k)
++ \mu_i S_{music}(u_i,r_k)
++ \xi S_{trend}(r_k).
+\end{aligned}
 $$
 
 The first five terms are personalized through the gate. The trend term is deliberately outside the learned gate and supervised ranking objective so that temporary platform-wide popularity does not become entangled with the user's representation.
@@ -836,15 +838,15 @@ The recommended situation-label pipeline is:
 
 ```text
 weak labels
-   ↓
+   v
 cleaning / deduplication
-   ↓
+   v
 human-annotated validation subset
-   ↓
+   v
 classifier training
-   ↓
+   v
 calibration and error analysis
-   ↓
+   v
 production inference
 ```
 
@@ -930,7 +932,7 @@ HR@K
 =
 \frac{1}{|\mathcal{U}|}
 \sum_{u\in\mathcal{U}}
-\mathbb{I}
+\mathbf{1}
 [
 \mathrm{rank}_u\le K
 ].
@@ -1054,13 +1056,13 @@ Recommended variants are:
 
 | Variant | Situation | City | Interest | Graph | Music/Playlist | Fairness gate |
 |---|---:|---:|---:|---:|---:|
-| CF baseline | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| + City | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| + Situation | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| + Graph | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
-| + Music/Playlist | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| + Dynamic Gate | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Full M²S²-Rec | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CF baseline | No | No | Yes | No | No | No |
+| + City | No | Yes | Yes | No | No | No |
+| + Situation | Yes | Yes | Yes | No | No | No |
+| + Graph | Yes | Yes | Yes | Yes | No | No |
+| + Music/Playlist | Yes | Yes | Yes | Yes | Yes | No |
+| + Dynamic Gate | Yes | Yes | Yes | Yes | Yes | Yes |
+| Full M²S²-Rec | Yes | Yes | Yes | Yes | Yes | Yes |
 
 Additional ablations should vary:
 
@@ -1288,7 +1290,7 @@ Suggested citation:
   title   = {M²S²-Rec: A City-Anchored, Life-Situation-Aware Architecture for Short-Form Video Recommendation},
   author  = {Md Hashibul Amin},
   year    = {2026},
-  note    = {Research manuscript; Copyright © 2026 Md Hashibul Amin. All rights reserved.}
+  note    = {Research manuscript; Copyright (C) 2026 Md Hashibul Amin. All rights reserved.}
 }
 ```
 
