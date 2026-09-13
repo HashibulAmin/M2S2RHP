@@ -12,7 +12,7 @@ Short-form video recommendation must operate under sparse, rapidly changing inte
 
 This paper presents **M²S²-Rec**, a city-anchored, life-situation-aware recommendation architecture for short-form video. The framework models user state through temporally decayed interaction embeddings, a fairness-audited behavioral and demographic representation, and a time-varying life-situation vector. Reel content is mapped to a multi-label life-situation taxonomy using textual evidence from captions, OCR, and automatic speech recognition (ASR), with optional visual and acoustic auxiliary features. Geographic relevance is modeled in two stages: an explicit city-match score provides the primary hyper-local signal, while a K-hop LightGCN-style social-spatial propagation layer provides a secondary neighborhood-trend signal. A RAPPOR-style local differential privacy mechanism is used for multi-dimensional location reports rather than independently perturbing every binary location feature under one nominal privacy budget.
 
-The final ranking score is produced by a learned per-user gate over situation, city, interest, and graph-based relevance. Training uses chronological interaction splits, BPR-style pairwise ranking, multi-label situation classification, adversarial fairness optimization, and regularization. Exploration and trending signals are treated as separate production layers rather than being injected into the supervised ranking loss. An executable JAX/NumPy prototype accompanies the manuscript. The prototype has been tested with synthetic data and reports ranking, cold-start, locality, and group-level diagnostic metrics; these results validate implementation behavior but are not claims of production performance or real-world superiority.
+The final ranking score is produced by a learned per-user gate over situation, city, direct interest, social-spatial, and music-playlist relevance. A dedicated lyrics-and-audio encoder represents each track, while a user music profile combines playlist evidence with music observed in reel interactions. Training uses chronological interaction splits, BPR-style pairwise ranking, multi-label situation classification, adversarial fairness optimization, and regularization. Exploration and trending signals are treated as separate production layers rather than being injected into the supervised ranking loss. An executable JAX/NumPy prototype accompanies the manuscript. The prototype has been tested with synthetic data and reports ranking, cold-start, locality, and group-level diagnostic metrics; these results validate implementation behavior but are not claims of production performance or real-world superiority.
 
 ---
 
@@ -113,8 +113,9 @@ M²S²-Rec is organized as five principal stages:
 1. **User state construction**
 2. **Life-situation content encoding**
 3. **City and social-spatial representation**
-4. **Dynamic multi-signal ranking**
-5. **Offline training and evaluation**
+4. **Music lyrics/audio and playlist profiling**
+5. **Dynamic multi-signal ranking**
+6. **Offline training and evaluation**
 
 A production implementation should use a two-stage serving architecture:
 
@@ -212,6 +213,52 @@ $$
 
 ---
 
+### 5.3 Music Lyrics, Audio, and User Playlist Modeling
+
+Music is treated as a first-class recommendation signal rather than an incidental reel attribute. For each track $m$, the system stores a bounded lyrics/text sequence and an acoustic feature vector. The research prototype uses tokenized lyrics-like features and fixed acoustic descriptors; no copyrighted lyric corpus is bundled with the repository.
+
+Let $q_m$ denote the lyrics token sequence and $\boldsymbol{\phi}_m$ the acoustic feature vector. A lightweight Transformer encodes the lyrics:
+
+$$
+\mathbf{e}_{m,lyrics} = \operatorname{MeanPool}(\operatorname{Transformer}(q_m)).
+$$
+
+The acoustic representation is projected into the same latent space and fused with the lyric representation:
+
+$$
+\mathbf{e}_{m,music} = W_p\tanh(W_l\mathbf{e}_{m,lyrics} + W_a\boldsymbol{\phi}_m + \mathbf{b}).
+$$
+
+This representation is content-derived, so a newly published reel can obtain a music representation before it accumulates engagement.
+
+For user $u_i$, let $\mathcal{P}_i$ be the tracks available in the user's playlist. With non-negative playlist weights $\omega_{im}$, the playlist profile is:
+
+$$
+\mathbf{e}_{i,playlist} = \frac{\sum_{m\in\mathcal{P}_i}\omega_{im}\mathbf{e}_{m,music}}{\sum_{m\in\mathcal{P}_i}\omega_{im}+\epsilon}.
+$$
+
+The profile is combined with music evidence extracted from the user's reel history:
+
+$$
+\mathbf{e}_{i,music} = \mathbf{e}_{i,music}^{history} + \rho\,\mathbf{e}_{i,playlist}.
+$$
+
+Here, $\rho$ controls the strength of playlist evidence and should be tuned on validation data. This design means that a user may influence reel ranking through both explicitly curated playlists and observed music interactions.
+
+The dedicated music-match score for a candidate reel $r_k$ with associated track $m(r_k)$ is:
+
+$$
+S_{music}(u_i,r_k)=\cos(\mathbf{e}_{i,music},\mathbf{e}_{m(r_k),music}).
+$$
+
+A separate situation-to-lyrics diagnostic may also be computed as:
+
+$$
+S_{situation-music}(u_i,m)=\cos(\mathbf{s}_i(t),\mathbf{z}_{m,lyrics}),
+$$
+
+when the lyric encoder is projected into the life-situation space. This auxiliary diagnostic is optional; the implementation's primary ranking term is $S_{music}$.
+
 ### 5.3 Life-Situation Classifier
 
 Let each reel expose the textual sequence
@@ -283,7 +330,7 @@ The key design choice is that these representations support **situation classifi
 
 ---
 
-### 5.4 Temporal Life-Situation State
+### 5.5 Temporal Life-Situation State
 
 Life situations are transient and may have different persistence times.
 
@@ -336,7 +383,7 @@ This is intended as a product-policy mechanism rather than a universally optimal
 
 ---
 
-### 5.5 City Match
+### 5.6 City Match
 
 The primary spatial signal is city anchored.
 
@@ -365,7 +412,7 @@ The exact city match is intentionally the dominant locality feature. Regional gr
 
 ---
 
-### 5.6 Social-Spatial Graph Propagation
+### 5.7 Social-Spatial Graph Propagation
 
 Let the social graph be:
 
@@ -431,7 +478,7 @@ Thus a newly registered user is not forced to inherit information from a nonexis
 
 ---
 
-### 5.7 Local Differential Privacy
+### 5.8 Local Differential Privacy
 
 Location information can reveal sensitive information when shared across a social graph. A naive approach that applies binary randomized response independently to every location bit with the same nominal $\epsilon$ does not automatically provide an overall $\epsilon$ guarantee for the full vector.
 
@@ -458,7 +505,7 @@ This is not equivalent to differential privacy. The two mechanisms address diffe
 
 ---
 
-### 5.8 Situation Relevance Score
+### 5.9 Situation Relevance Score
 
 Given the user state $\mathbf{s}_i(t)$ and reel situation distribution $\mathbf{p}_k$:
 
@@ -479,7 +526,7 @@ If a user has no inferred situation history, the score is treated as an unavaila
 
 ---
 
-### 5.9 Direct Interest Score
+### 5.10 Direct Interest Score
 
 The direct collaborative/content relevance term is:
 
@@ -497,7 +544,7 @@ This term is essential because the model should not rely exclusively on demograp
 
 ---
 
-### 5.10 Social-Spatial Reel Score
+### 5.11 Social-Spatial Reel Score
 
 The graph representation is projected into the reel embedding space:
 
@@ -523,63 +570,38 @@ The transpose/dot-product formulation is explicit to avoid the dimensional ambig
 
 ---
 
-### 5.11 Dynamic Joint Scoring
+### 5.12 Dynamic Joint Scoring
 
-A fixed global weight vector assumes every user depends on the same evidence.
-
-Instead:
+A fixed global weight vector assumes every user depends on the same evidence. M²S²-Rec therefore uses a five-way per-user gate:
 
 $$
-\mathbf{x}_i
-=
-[
-\mathbf{e}_{i,interest}(t)
-\Vert
-\mathbf{e}_{i,style}(t)
-\Vert
-\mathbf{b}_i
-].
+\boldsymbol{\alpha}_i = [\alpha_i,\beta_i,\gamma_i,\delta_i,\mu_i]
+=\operatorname{softmax}(\operatorname{MLP}_{gate}(\mathbf{x}_i)).
 $$
 
-The gate is:
+The final ranking score is:
 
 $$
-[
-\alpha_i,\beta_i,\gamma_i,\delta_i
-]
-=
-\operatorname{softmax}
-(
-\operatorname{MLP}_{gate}(\mathbf{x}_i)
-).
+\hat{y}_{i,k}=\alpha_iS_{situation}(u_i,r_k)
++\beta_iS_{city}(u_i,r_k)
++\gamma_iS_{interest}(u_i,r_k)
++\delta_iS_{geo}(u_i,r_k)
++\mu_iS_{music}(u_i,r_k) + \xi S_{trend}(r_k).
 $$
 
-The final score is:
-
-$$
-\hat{y}_{i,k}
-=
-\alpha_iS_{situation}(u_i,r_k)
-+
-\beta_iS_{city}(u_i,r_k)
-+
-\gamma_iS_{interest}(u_i,r_k)
-+
-\delta_iS_{geo}(u_i,r_k).
-$$
+The first five terms are personalized through the gate. The trend term is deliberately outside the learned gate and supervised ranking objective so that temporary platform-wide popularity does not become entangled with the user's representation.
 
 The interpretation is:
 
 - $\alpha_i$: life-situation relevance;
 - $\beta_i$: explicit city relevance;
 - $\gamma_i$: direct interest relevance;
-- $\delta_i$: social-spatial graph relevance.
+- $\delta_i$: social-spatial graph relevance;
+- $\mu_i$: music and playlist relevance.
 
-This formulation lets the model shift its reliance on signals as a user's interaction history changes.
+A playlist-rich user can therefore receive a larger music weight when music preferences are reliable, while a user with little or no playlist/history evidence can rely more heavily on situation, city, and graph signals.
 
----
-
-### 5.12 Optional Peer-Matching Surface
+### 5.13 Optional Peer-Matching Surface
 
 If the product goal includes connecting users going through similar circumstances, recommendation of people should be treated as a separate retrieval task.
 
@@ -770,7 +792,7 @@ optional social-edge reference
 
 Derived engagement features should be computed deterministically from raw events.
 
-### 7.2 Reel Content Schema
+### 7.2 Reel and Music Content Schema
 
 A reel record should contain:
 
@@ -784,8 +806,29 @@ ocr_text
 asr_text
 audio_id
 optional visual embedding
-optional audio embedding
 ```
+
+A music-track record should additionally contain:
+
+```text
+audio_id
+lyrics_text or lyrics_tokens
+artist_id (optional)
+genre/features (optional)
+audio_embedding or acoustic_features
+```
+
+A user playlist record should contain:
+
+```text
+user_id
+audio_id
+playlist_id
+playlist_weight or interaction strength
+playlist_timestamp (when available)
+```
+
+Only playlist tracks available before the prediction timestamp should contribute to a historical user music vector. The prototype uses synthetic lyrics-like tokens and does not distribute licensed song lyrics.
 
 ### 7.3 Labeling Pipeline
 
@@ -814,7 +857,9 @@ Data analysis should explicitly prevent:
 - future interactions entering past user state;
 - test positives becoming sampled negatives;
 - city information derived from the future test event being available during training;
-- labels generated from engagement outcomes that happen after the prediction timestamp.
+- labels generated from engagement outcomes that happen after the prediction timestamp;
+- playlist tracks added after the prediction timestamp entering the user's historical music vector;
+- future playlist edits being treated as historical preferences.
 
 ### 7.5 Synthetic-to-Real Limitation
 
@@ -901,7 +946,7 @@ NDCG@K
 \frac{DCG_u@K}{IDCG_u@K}.
 $$
 
-The implementation also reports pairwise AUC-style performance and city-hit rate.
+The implementation also reports pairwise AUC-style performance, city-hit rate, and the mean five-way gate including the music component.
 
 ### 9.2 Cold-Start Evaluation
 
@@ -914,7 +959,17 @@ Report at least:
 
 This prevents a strong warm-user score from hiding poor onboarding behavior.
 
-### 9.3 Fairness Diagnostics
+### 9.3 Music-Aware Diagnostics
+
+Music-aware recommendation should be evaluated separately from generic ranking. Useful diagnostics include:
+
+- playlist-to-reel music similarity among recommended items;
+- top-$K$ hit rate for tracks or genres represented in a user's playlist;
+- cold-item performance when the associated track has no interaction history;
+- ranking sensitivity under playlist ablation;
+- novelty and artist/track coverage to ensure playlist personalization does not collapse discovery.
+
+### 9.4 Fairness Diagnostics
 
 Group-level diagnostics should include, where legally and ethically appropriate:
 
@@ -926,7 +981,7 @@ Group-level diagnostics should include, where legally and ethically appropriate:
 
 No single fairness metric is sufficient for all products.
 
-### 9.4 Locality Metrics
+### 9.5 Locality Metrics
 
 The city-aware design motivates:
 
@@ -942,7 +997,7 @@ $$
 
 This should be reported alongside diversity metrics so that stronger locality is not mistaken for universally better recommendation.
 
-### 9.5 Diversity and Coverage
+### 9.6 Diversity and Coverage
 
 Useful complementary metrics include:
 
@@ -987,7 +1042,7 @@ A smoke-test experiment produced the following illustrative synthetic-data resul
 
 These numbers are **implementation-validation results on synthetic experimental data**. They do not establish that M²S²-Rec outperforms CF, LightGCN, multimodal recommenders, or production systems on real-world datasets.
 
-The repository's automated test suite currently passes **6/6 core tests** for the implemented prototype.
+The repository's automated test suite covers the core architecture plus lyrics-tokenization, playlist construction, music scoring, and future-playlist leakage checks.
 
 ---
 
@@ -997,14 +1052,15 @@ A complete empirical study should isolate the contribution of each major signal.
 
 Recommended variants are:
 
-| Variant | Situation | City | Interest | Graph | Fairness gate |
+| Variant | Situation | City | Interest | Graph | Music/Playlist | Fairness gate |
 |---|---:|---:|---:|---:|---:|
-| CF baseline | ❌ | ❌ | ✅ | ❌ | ❌ |
-| + City | ❌ | ✅ | ✅ | ❌ | ❌ |
-| + Situation | ✅ | ✅ | ✅ | ❌ | ❌ |
-| + Graph | ✅ | ✅ | ✅ | ✅ | ❌ |
-| + Dynamic Gate | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Full M²S²-Rec | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CF baseline | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| + City | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| + Situation | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| + Graph | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| + Music/Playlist | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| + Dynamic Gate | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Full M²S²-Rec | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 Additional ablations should vary:
 
@@ -1064,6 +1120,16 @@ Let:
 - $K$ be the number of graph hops.
 
 ### Content Encoding
+
+The reel text encoder has approximate per-reel complexity:
+
+$$O(L^2d)$$
+
+For $M$ reels this is approximately $O(ML^2d)$. The music encoder adds an analogous term for $M_m$ unique tracks and lyric length $L_m$:
+
+$$O(M_mL_m^2d_m),$$
+
+plus a linear acoustic projection. Playlist profile construction is $O(NPd)$ for $N$ users with average playlist length $P$.
 
 A dense Transformer encoder has approximate per-reel complexity:
 
@@ -1133,7 +1199,10 @@ Using separate datasets for behavior, city, social links, music, and demographic
 
 Because city and social graph signals can reinforce local homophily, exploration, diversity, and exposure monitoring are essential.
 
-### 14.7 Missing Real-World Benchmark
+### 14.7 Playlist, Lyrics, and Music Data Availability
+Real deployments must obtain playlist and lyrics data under applicable platform terms, copyright constraints, and user-consent requirements. The prototype therefore uses synthetic lyrics-like token sequences rather than distributing licensed song lyrics. Lyrics language, transcription quality, and explicit playlist semantics may materially affect performance.
+
+### 14.8 Missing Real-World Benchmark
 
 The current prototype does not constitute a full benchmark against production-scale systems. A public-data or proprietary-data evaluation with reproducible preprocessing and stronger baselines remains necessary.
 
@@ -1181,9 +1250,10 @@ The architecture combines:
 5. K-hop social-spatial propagation;
 6. privacy-aware geographic representations;
 7. dynamic per-user ranking gates;
-8. explicit cold-start handling;
-9. chronological offline evaluation;
-10. separate exploration and trend layers for production.
+8. music lyrics/audio representation and user-playlist profiling;
+9. explicit cold-start handling;
+10. chronological offline evaluation;
+11. separate exploration and trend layers for production.
 
 The principal methodological change from the earlier demographic/OCEAN formulation is deliberate: the system no longer treats inferred personality as a validated psychological measurement. Instead, measurable engagement behavior is represented as an embedding, while demographic attributes are constrained by the fairness mechanism.
 

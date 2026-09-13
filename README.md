@@ -6,7 +6,8 @@ The repository is intentionally framed as a **research prototype on synthetic da
 
 ## What is implemented
 
-- Temporal user interest and music vectors with signed implicit feedback and recency decay.
+- Temporal user interest vectors with signed implicit feedback and recency decay.
+- Lyrics + acoustic music encoder and playlist-aware user music profiles.
 - A multi-label life-situation classifier over caption/OCR/ASR-style token streams plus fixed synthetic visual features.
 - Explicit onboarding situation floors with per-situation learned decay rates.
 - Exact city matching plus distance-aware near-city fallback.
@@ -15,6 +16,7 @@ The repository is intentionally framed as a **research prototype on synthetic da
 - Explicit minimax adversarial training: the protected-attribute adversary learns normally while the fairness gate receives the reversed objective.
 - Learned per-user softmax gating across situation, city, interest, and geo signals.
 - A bounded personalization-independent recency/trending feature.
+- A fifth dynamic ranking signal for playlist/music relevance.
 - Training-only exploitation objective; exploration is kept out of BPR optimization to avoid changing the training target.
 - Chronological user holdouts, leakage-aware negative sampling, and offline Recall@K / NDCG@K / pairwise AUC diagnostics.
 
@@ -59,6 +61,8 @@ Run the unit tests:
 python -m unittest discover -s tests -v
 ```
 
+The music-specific tests verify stable lyrics tokenization, playlist weighting, playlist-driven music scoring, and prevention of future playlist leakage.
+
 Run training only:
 
 ```bash
@@ -72,6 +76,26 @@ python run_experiment.py --epochs 2 --output artifacts/results.json
 ```
 
 The default configuration is deliberately small enough for CPU execution. Larger public datasets should be integrated through a separate data adapter rather than changing the synthetic generator into a pseudo-real dataset.
+
+## Music lyrics and playlist recommendation
+
+Music is a first-class signal in the implementation. Each track has a bounded lyrics-like token sequence and acoustic feature vector. `model/music_encoder.py` encodes both modalities into a shared music embedding. The prototype deliberately uses synthetic token sequences and does not distribute copyrighted song lyrics.
+
+Each user also has a playlist representation. The playlist is converted into a weighted mean of track embeddings and combined with music evidence inferred from the user's reel history:
+
+```text
+user music profile
+    = history music embedding
+    + playlist_mix × playlist embedding
+```
+
+A candidate reel gets a music score by cosine similarity between its associated track embedding and the user's combined music profile. The dynamic ranking gate now has five weights:
+
+```text
+Situation | City | Interest | Geo | Music/Playlist
+```
+
+The data generator also includes `track_lyrics`, `track_audio`, `reel_track`, `playlist_track`, and `playlist_weight`. `data/music.py` additionally provides a deterministic lyrics tokenizer and a timestamp-safe playlist builder for real-data adapters. In a real integration, replace these synthetic fields with licensed/consented track metadata, lyrics or lyric embeddings, acoustic embeddings, and timestamped playlist events. Playlist events must be cut off at the prediction timestamp to avoid temporal leakage.
 
 ## Experimental protocol
 
@@ -87,7 +111,7 @@ The social graph is refreshed once per synthetic world build, representing the p
 
 ## Results semantics
 
-The included JSON result is a smoke-test/illustrative run on synthetic data. Metrics must not be presented as MicroLens, TikTok, or production results. The repository is suitable as an architecture implementation and experiment harness; the next empirical step is integration with a genuinely collected public dataset with compatible user/item metadata.
+The included JSON result is a smoke-test/illustrative run on synthetic data. Metrics must not be presented as MicroLens, TikTok, or production results. The repository is suitable as an architecture implementation and experiment harness; the next empirical step is integration with a genuinely collected public dataset with compatible user/item metadata, music metadata, and legally usable lyrics/audio representations.
 
 
 ## License and paper ownership

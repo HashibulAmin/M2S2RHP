@@ -111,7 +111,7 @@ def train_loop(world: MockWorldData, cfg: Config, verbose: bool = True):
                 f"BPR={row['bpr']:.4f} BCE={row['situation_bce']:.4f} "
                 f"ADV={row['adversary_ce']:.4f} margin={row['margin']:.4f}"
             )
-            print(f"Mean gate [situation, city, interest, geo]: {row['gate']}")
+            print(f"Mean gate [situation, city, interest, geo, music]: {row['gate']}")
     return params, history
 
 

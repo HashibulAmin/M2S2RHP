@@ -31,15 +31,17 @@ def _rank_metrics(scores: np.ndarray, targets: np.ndarray, seen: np.ndarray, k: 
 def evaluate(params, world: MockWorldData, cfg: Config) -> dict:
     ctx = build_ctx(world, world.g_all, cfg)
     content_reprs, situation_probs = encode_all_reels(params, cfg, ctx)
+    from model.m2s2rec import encode_all_music
+    music_reprs = encode_all_music(params, cfg, ctx)
     uids = jnp.arange(cfg.n_users, dtype=jnp.int32)
-    rep = user_representation(params, cfg, ctx, uids, situation_probs, content_reprs)
+    rep = user_representation(params, cfg, ctx, uids, situation_probs, content_reprs, music_reprs)
 
     n_users, n_reels = cfg.n_users, cfg.n_reels
     all_uids = jnp.repeat(uids, n_reels)
     all_rids = jnp.tile(jnp.arange(n_reels, dtype=jnp.int32), n_users)
     expanded = {k: jnp.repeat(v, n_reels, axis=0) for k, v in rep.items()}
     scores_flat, _ = score_candidates(
-        params, cfg, ctx, all_uids, all_rids, expanded, situation_probs, content_reprs
+        params, cfg, ctx, all_uids, all_rids, expanded, situation_probs, content_reprs, music_reprs
     )
     scores = np.asarray(scores_flat).reshape(n_users, n_reels)
 

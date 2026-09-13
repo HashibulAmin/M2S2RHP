@@ -26,24 +26,30 @@ SITUATIONS = ("job_search", "new_parent", "moving", "graduation")
 
 
 class Config(NamedTuple):
-    d_model: int = 24
-    d_style: int = 12
-    d_cat: int = 6
-    d_fair: int = 12
-    d_hidden: int = 32
-    n_reels: int = 80
-    n_cities: int = 8
-    n_education: int = 6
-    n_gender: int = 4
-    n_occupation: int = 8
-    n_users: int = 40
-    rappor_bloom_bits: int = 32
+    d_model: int = 12
+    d_style: int = 6
+    music_audio_dim: int = 4
+    music_vocab_size: int = 64
+    music_max_seq_len: int = 6
+    music_text_layers: int = 1
+    music_text_heads: int = 3
+    d_cat: int = 3
+    d_fair: int = 6
+    d_hidden: int = 12
+    n_reels: int = 20
+    n_cities: int = 4
+    n_education: int = 3
+    n_gender: int = 3
+    n_occupation: int = 4
+    n_users: int = 10
+    rappor_bloom_bits: int = 12
     rappor_n_hashes: int = 2
     rappor_f: float = 0.5
     rappor_p: float = 0.5
     rappor_q: float = 0.75
     situations: tuple = SITUATIONS
     lambda_interest: float = 0.05
+    playlist_mix: float = 0.75
     city_eta: float = 0.5
     city_tau_km: float = 80.0
     lambda_cls: float = 1.0
@@ -52,26 +58,27 @@ class Config(NamedTuple):
     kappa_explicit: float = 0.4
     trace_days: float = 90.0
     learning_rate: float = 3e-4
-    epochs: int = 2
+    epochs: int = 1
     seed: int = 42
-    batch_size: int = 8
-    hist_len: int = 12
-    vocab_size: int = 256
-    max_seq_len: int = 8
+    batch_size: int = 4
+    hist_len: int = 8
+    playlist_len: int = 6
+    vocab_size: int = 64
+    max_seq_len: int = 6
     n_protected_classes: int = 4
-    n_text_layers: int = 2
-    n_text_heads: int = 4
+    n_text_layers: int = 1
+    n_text_heads: int = 3
     n_gcn_hops: int = 2
     gate_epsilon: float = 0.05
     trend_lambda: float = 0.03
     trend_mix: float = 0.02
-    n_batches: int = 4
+    n_batches: int = 1
     cold_start_frac: float = 0.10
     val_holdout: int = 1
     test_holdout: int = 1
     min_train_events: int = 4
     peer_delta_km: float = 120.0
-    eval_k: int = 20
+    eval_k: int = 5
 
 
 class MockWorldData:
@@ -114,6 +121,11 @@ class MockWorldData:
         # Fixed synthetic visual features: situation-correlated, but not item-id learnable.
         visual_basis = rng.normal(0.0, 0.4, size=(n_sit, cfg.d_model)).astype(np.float32)
         self.reel_visual = np.zeros((cfg.n_reels, cfg.d_model), dtype=np.float32)
+        self.n_tracks = cfg.n_reels
+        self.track_lyrics = np.zeros((self.n_tracks, cfg.music_max_seq_len), dtype=np.int32)
+        self.track_lyrics_mask = np.ones((self.n_tracks, cfg.music_max_seq_len), dtype=bool)
+        self.track_audio = rng.normal(0.0, 1.0, (self.n_tracks, cfg.music_audio_dim)).astype(np.float32)
+        self.reel_track = np.arange(cfg.n_reels, dtype=np.int32)
 
         marker_block = max(8, cfg.vocab_size // n_sit)
         for k in range(cfg.n_reels):
@@ -134,9 +146,39 @@ class MockWorldData:
                 ids.append(int(rng.integers(lo, max(hi, lo + 1))))
             self.reel_tokens[k] = np.asarray(ids[: cfg.max_seq_len], dtype=np.int32)
 
+        # Music tracks have lyrics-like tokens correlated with the reel's primary situation,
+        # plus fixed acoustic descriptors. No copyrighted lyric text is embedded in the repo.
+        music_marker_block = max(8, cfg.music_vocab_size // n_sit)
+        for m in range(self.n_tracks):
+            primary = int(np.argmax(self.reel_situation[m]))
+            lo = int(primary * music_marker_block)
+            hi = min(int((primary + 1) * music_marker_block), cfg.music_vocab_size)
+            ids = [lo]
+            while len(ids) < cfg.music_max_seq_len:
+                ids.append(int(rng.integers(lo, max(hi, lo + 1))))
+            self.track_lyrics[m] = np.asarray(ids[: cfg.music_max_seq_len], dtype=np.int32)
+
         # The synthetic weak labels intentionally approximate hashtag bootstrapping.
         # In a real system these would be derived from observed hashtags, then audited.
         self.reel_weak_situation = self.reel_situation.copy()
+
+        # --- User playlists ---------------------------------------------------
+        # Playlists are sampled independently but from each user's learned situation/city
+        # priors; only playlist evidence available at training time is used for the user's
+        # music representation, preventing test-event leakage.
+        self.playlist_track = np.zeros((cfg.n_users, cfg.playlist_len), dtype=np.int32)
+        self.playlist_weight = np.zeros((cfg.n_users, cfg.playlist_len), dtype=np.float32)
+        for uid in range(cfg.n_users):
+            pref = self.user_situation_prior(uid)
+            choices = []
+            for _ in range(cfg.playlist_len):
+                sit = int(rng.choice(n_sit, p=pref))
+                pool = np.where(self.reel_situation[:, sit] > 0)[0]
+                if pool.size == 0:
+                    pool = np.arange(self.n_tracks)
+                choices.append(int(rng.choice(pool)))
+            self.playlist_track[uid] = np.asarray(choices, dtype=np.int32)
+            self.playlist_weight[uid] = rng.uniform(0.4, 1.0, cfg.playlist_len).astype(np.float32)
 
         # --- Full chronological event log -----------------------------------
         cold_n = max(1, int(round(cfg.cold_start_frac * cfg.n_users)))

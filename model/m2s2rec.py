@@ -28,6 +28,7 @@ from model.scoring import (
     temporal_situation_vector,
 )
 from model.text_encoder import encode_reels, init_text_encoder
+from model.music_encoder import encode_music, init_music_encoder
 
 
 class Ctx(NamedTuple):
@@ -50,6 +51,12 @@ class Ctx(NamedTuple):
     reel_visual: jnp.ndarray
     reel_age_days: jnp.ndarray
     reel_pop: jnp.ndarray
+    track_lyrics: jnp.ndarray
+    track_lyrics_mask: jnp.ndarray
+    track_audio: jnp.ndarray
+    reel_track: jnp.ndarray
+    playlist_track: jnp.ndarray
+    playlist_weight: jnp.ndarray
     day_now: float
 
 
@@ -74,27 +81,32 @@ def build_ctx(world, g_all, cfg) -> Ctx:
         jnp.asarray(world.reel_visual, dtype=jnp.float32),
         jnp.asarray(world.reel_age_days, dtype=jnp.float32),
         jnp.asarray(world.reel_pop, dtype=jnp.float32),
+        jnp.asarray(world.track_lyrics, dtype=jnp.int32),
+        jnp.asarray(world.track_lyrics_mask),
+        jnp.asarray(world.track_audio, dtype=jnp.float32),
+        jnp.asarray(world.reel_track, dtype=jnp.int32),
+        jnp.asarray(world.playlist_track, dtype=jnp.int32),
+        jnp.asarray(world.playlist_weight, dtype=jnp.float32),
         float(cfg.trace_days),
     )
 
 
 def init_params(key, cfg):
-    keys = jax.random.split(key, 11)
+    keys = jax.random.split(key, 12)
     d_demo = 1 + cfg.d_cat * 4
     fair_in = d_demo + 3
     n_sit = len(cfg.situations)
     return {
         "text_encoder": init_text_encoder(keys[0], cfg),
-        # Optional warm-item residual; content encoder remains the primary item path.
-        "reel_id_residual": init_embedding(keys[1], cfg.n_reels, cfg.d_model),
-        "reel_music_emb": init_embedding(keys[2], cfg.n_reels, cfg.d_style),
-        "edu_emb": init_embedding(keys[3], cfg.n_education, cfg.d_cat),
-        "gender_emb": init_embedding(keys[4], cfg.n_gender, cfg.d_cat),
-        "occ_emb": init_embedding(keys[5], cfg.n_occupation, cfg.d_cat),
-        "city_emb_user": init_embedding(keys[6], cfg.n_cities, cfg.d_cat),
-        "fair_gate": init_fair_gate(keys[7], cfg, fair_in),
-        "W_g": jax.random.normal(keys[8], (cfg.rappor_bloom_bits, cfg.d_model)) * 0.02,
-        "gate_mlp": init_mlp(keys[9], [cfg.d_model + cfg.d_style + cfg.d_fair, cfg.d_hidden, 4]),
+        "music_encoder": init_music_encoder(keys[1], cfg),
+        "reel_id_residual": init_embedding(keys[2], cfg.n_reels, cfg.d_model),
+        "edu_emb": init_embedding(keys[4], cfg.n_education, cfg.d_cat),
+        "gender_emb": init_embedding(keys[5], cfg.n_gender, cfg.d_cat),
+        "occ_emb": init_embedding(keys[6], cfg.n_occupation, cfg.d_cat),
+        "city_emb_user": init_embedding(keys[7], cfg.n_cities, cfg.d_cat),
+        "fair_gate": init_fair_gate(keys[8], cfg, fair_in),
+        "W_g": jax.random.normal(keys[9], (cfg.rappor_bloom_bits, cfg.d_model)) * 0.02,
+        "gate_mlp": init_mlp(keys[10], [cfg.d_model + cfg.d_model + cfg.d_fair, cfg.d_hidden, 5]),
         "situation_lambda_raw": jnp.full((n_sit,), -1.0),
     }
 
@@ -119,7 +131,22 @@ def encode_all_reels(params, cfg, ctx: Ctx):
     )
 
 
-def user_representation(params, cfg, ctx: Ctx, uid, all_situation_probs, all_content_reprs):
+def encode_all_music(params, cfg, ctx: Ctx):
+    """Encode every music track from lyrics-like tokens + acoustic features."""
+    return encode_music(
+        params["music_encoder"], cfg, ctx.track_lyrics, ctx.track_lyrics_mask, ctx.track_audio
+    )
+
+
+def playlist_music_vector(track_reprs, playlist_track, playlist_weight):
+    tracks = jnp.take(track_reprs, playlist_track, axis=0)
+    weights = jnp.asarray(playlist_weight, dtype=tracks.dtype)
+    coeff = weights[:, :, None]
+    denom = jnp.maximum(jnp.sum(weights, axis=1, keepdims=True), 1e-6)
+    return jnp.sum(coeff * tracks, axis=1) / denom
+
+
+def user_representation(params, cfg, ctx: Ctx, uid, all_situation_probs, all_content_reprs, all_music_reprs):
     d_i = _demographic_vector(params, ctx, uid)
     p_i = ctx.user_behavior[uid]
     b_i = fair_gate_forward(params["fair_gate"], jnp.concatenate([d_i, p_i], axis=-1))
@@ -129,12 +156,16 @@ def user_representation(params, cfg, ctx: Ctx, uid, all_situation_probs, all_con
     h_day = ctx.hist_day[uid]
     h_mask = ctx.hist_mask[uid]
     hist_v = all_content_reprs[h_reel] + params["reel_id_residual"][h_reel]
-    hist_music = embedding_lookup(params["reel_music_emb"], h_reel)
+    hist_music = jnp.take(all_music_reprs, ctx.reel_track[h_reel], axis=0)
     hist_situation = jnp.take(all_situation_probs, h_reel, axis=0)
 
     day_now = jnp.full((uid.shape[0],), ctx.day_now)
     e_interest = temporal_interest_vector(hist_v, h_w, day_now, h_day, h_mask, cfg.lambda_interest)
-    e_music = temporal_interest_vector(hist_music, h_w, day_now, h_day, h_mask, cfg.lambda_interest)
+    e_music_history = temporal_interest_vector(hist_music, h_w, day_now, h_day, h_mask, cfg.lambda_interest)
+    e_music_playlist = playlist_music_vector(
+        all_music_reprs, ctx.playlist_track[uid], ctx.playlist_weight[uid]
+    )
+    e_music = e_music_history + cfg.playlist_mix * e_music_playlist
 
     lam_q = jax.nn.softplus(params["situation_lambda_raw"]) + 1e-4
     s_i = temporal_situation_vector(hist_situation, h_w, day_now, h_day, h_mask, lam_q)
@@ -147,17 +178,19 @@ def user_representation(params, cfg, ctx: Ctx, uid, all_situation_probs, all_con
 
 
 def score_candidates(
-    params, cfg, ctx, uid, rid, user_repr, all_situation_probs, content_reprs, gate_override=None
+    params, cfg, ctx, uid, rid, user_repr, all_situation_probs, content_reprs, all_music_reprs, gate_override=None
 ):
     content_v = content_reprs[rid]
     # Warm-item residual improves personalization when the reel has history, while
     # content_v alone remains a valid representation for a brand-new reel.
     v_r = content_v + params["reel_id_residual"][rid]
     situation_r = jnp.take(all_situation_probs, rid, axis=0)
+    music_r = jnp.take(all_music_reprs, ctx.reel_track[rid], axis=0)
     s_situation = cosine_sim(user_repr["s_i"], situation_r)
     s_city = city_match_score(ctx.user_city[uid], ctx.reel_city[rid], ctx.city_dist_km, cfg.city_eta, cfg.city_tau_km)
     s_interest = cosine_sim(user_repr["e_interest"], v_r)
     s_geo = jax.nn.sigmoid(jnp.sum(user_repr["geo_proj"] * v_r, axis=-1))
+    s_music = cosine_sim(user_repr["e_music"], music_r)
     gate = user_repr["gate"] if gate_override is None else gate_override
     core = (
         gate[:, 0] * s_situation
@@ -171,18 +204,20 @@ def score_candidates(
         "S_city": s_city,
         "S_interest": s_interest,
         "S_geo": s_geo,
+        "S_music": s_music,
         "S_trend": trend,
     }
 
 
 def forward_bpr_batch(params, cfg, ctx, uid, pos_rid, neg_rid):
     text_reprs, situation_probs = encode_all_reels(params, cfg, ctx)
-    user_repr = user_representation(params, cfg, ctx, uid, situation_probs, text_reprs)
+    music_reprs = encode_all_music(params, cfg, ctx)
+    user_repr = user_representation(params, cfg, ctx, uid, situation_probs, text_reprs, music_reprs)
     y_pos, pos_components = score_candidates(
-        params, cfg, ctx, uid, pos_rid, user_repr, situation_probs, text_reprs
+        params, cfg, ctx, uid, pos_rid, user_repr, situation_probs, text_reprs, music_reprs
     )
     y_neg, neg_components = score_candidates(
-        params, cfg, ctx, uid, neg_rid, user_repr, situation_probs, text_reprs
+        params, cfg, ctx, uid, neg_rid, user_repr, situation_probs, text_reprs, music_reprs
     )
     adversary_logits = adversary_forward(params["fair_gate"], user_repr["b_i"], y_pos)
     return {
@@ -202,11 +237,12 @@ def score_user_candidates(params, cfg, ctx, uid: int, candidate_rids):
     uid_arr = jnp.full((len(candidate_rids),), uid, dtype=jnp.int32)
     rid = jnp.asarray(candidate_rids, dtype=jnp.int32)
     text_reprs, probs = encode_all_reels(params, cfg, ctx)
+    music_reprs = encode_all_music(params, cfg, ctx)
     one_user = user_representation(
-        params, cfg, ctx, jnp.asarray([uid], dtype=jnp.int32), probs, text_reprs
+        params, cfg, ctx, jnp.asarray([uid], dtype=jnp.int32), probs, text_reprs, music_reprs
     )
     expanded = {k: jnp.repeat(v, len(candidate_rids), axis=0) for k, v in one_user.items()}
     scores, components = score_candidates(
-        params, cfg, ctx, uid_arr, rid, expanded, probs, text_reprs
+        params, cfg, ctx, uid_arr, rid, expanded, probs, text_reprs, music_reprs
     )
     return scores, components, one_user["gate"][0]

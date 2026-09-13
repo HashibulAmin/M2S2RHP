@@ -6,8 +6,9 @@ import jax.numpy as jnp
 
 from data.dataset import Config, MockWorldData
 from data.graph import lightgcn_propagate
+from data.music import PlaylistEvent, build_playlist_arrays, tokenize_lyrics
 from data.privacy import rappor_epsilon_per_bit, rappor_vector_epsilon_upper_bound
-from model.m2s2rec import build_ctx, encode_all_reels, init_params, score_user_candidates, user_representation
+from model.m2s2rec import build_ctx, encode_all_reels, encode_all_music, init_params, score_user_candidates, user_representation, playlist_music_vector, score_candidates
 from model.scoring import city_match_score, cosine_sim, temporal_decay_weights
 
 
@@ -70,6 +71,53 @@ class CoreTests(unittest.TestCase):
         eps = rappor_epsilon_per_bit(0.5, 0.5, 0.75)
         self.assertGreater(eps, 0.0)
         self.assertAlmostEqual(rappor_vector_epsilon_upper_bound(64, 0.5, 0.5, 0.75), 64 * eps)
+
+    def test_lyrics_tokenizer_is_stable_and_masked(self):
+        a_ids, a_mask = tokenize_lyrics("job search new role", 64, 6)
+        b_ids, b_mask = tokenize_lyrics("job search new role", 64, 6)
+        np.testing.assert_array_equal(a_ids, b_ids)
+        np.testing.assert_array_equal(a_mask, b_mask)
+        self.assertEqual(int(a_mask.sum()), 4)
+
+    def test_playlist_timestamp_cutoff_prevents_future_leakage(self):
+        events = [
+            PlaylistEvent(0, 1, 1.0, 1.0),
+            PlaylistEvent(0, 2, 5.0, 1.0),
+            PlaylistEvent(0, 3, 10.0, 1.0),
+        ]
+        ids, weights = build_playlist_arrays(events, n_users=1, playlist_len=3, as_of_timestamp=5.0)
+        self.assertNotIn(3, ids[0].tolist())
+        self.assertGreater(float(weights[0].sum()), 0.0)
+
+    def test_playlist_music_vector_is_weighted_and_finite(self):
+        params = init_params(jax.random.PRNGKey(self.cfg.seed), self.cfg)
+        ctx = build_ctx(self.world, self.world.g_all, self.cfg)
+        music = encode_all_music(params, self.cfg, ctx)
+        vec = playlist_music_vector(music, jnp.asarray(self.world.playlist_track[:2]), jnp.asarray(self.world.playlist_weight[:2]))
+        self.assertEqual(vec.shape, (2, self.cfg.d_model))
+        self.assertTrue(np.isfinite(np.asarray(vec)).all())
+
+    def test_music_score_uses_playlist_representation(self):
+        params = init_params(jax.random.PRNGKey(self.cfg.seed), self.cfg)
+        ctx = build_ctx(self.world, self.world.g_all, self.cfg)
+        content, probs = encode_all_reels(params, self.cfg, ctx)
+        music = encode_all_music(params, self.cfg, ctx)
+        rep = user_representation(params, self.cfg, ctx, jnp.asarray([0]), probs, content, music)
+        self.assertEqual(rep["e_music"].shape, (1, self.cfg.d_model))
+        self.assertEqual(rep["gate"].shape[-1], 5)
+        uid = jnp.asarray([0])
+        rid = jnp.asarray([0])
+        expanded = {k: v for k, v in rep.items()}
+        _, comp = score_candidates(
+            params, self.cfg, ctx, uid, rid, expanded, probs, content, music
+        )
+        self.assertIn("S_music", comp)
+        self.assertTrue(np.isfinite(np.asarray(comp["S_music"])).all())
+        reversed_tracks = jnp.asarray(self.world.playlist_track[0][::-1])[None, :]
+        same_weights = jnp.asarray(self.world.playlist_weight[0])[None, :]
+        altered_ctx = ctx._replace(playlist_track=ctx.playlist_track.at[0].set(reversed_tracks[0]))
+        altered_rep = user_representation(params, self.cfg, altered_ctx, jnp.asarray([0]), probs, content, music)
+        self.assertGreater(float(jnp.linalg.norm(rep["e_music"] - altered_rep["e_music"])), 1e-8)
 
     def test_item_cold_start_uses_content_path(self):
         params = init_params(jax.random.PRNGKey(self.cfg.seed), self.cfg)
