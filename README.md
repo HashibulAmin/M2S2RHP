@@ -460,9 +460,9 @@ A BibTeX entry can be added here once the paper has an official publication reco
 ```bibtex
 @article{m2s2rec,
   title   = {M²S²-Rec: A City-Anchored, Life-Situation-Aware Architecture for Short-Form Video Recommendation},
-  author  = {Author Name},
+  author  = {Md Hashibul Amin},
   year    = {2026},
-  note    = {Research manuscript}
+  note    = {Research manuscript; Copyright © 2026 Md Hashibul Amin. All rights reserved.}
 }
 ```
 
