@@ -1,0 +1,107 @@
+{
+  "config": {
+    "d_model": 24,
+    "d_style": 12,
+    "d_cat": 6,
+    "d_fair": 12,
+    "d_hidden": 32,
+    "n_reels": 80,
+    "n_cities": 8,
+    "n_education": 6,
+    "n_gender": 4,
+    "n_occupation": 8,
+    "n_users": 40,
+    "rappor_bloom_bits": 32,
+    "rappor_n_hashes": 2,
+    "rappor_f": 0.5,
+    "rappor_p": 0.5,
+    "rappor_q": 0.75,
+    "situations": [
+      "job_search",
+      "new_parent",
+      "moving",
+      "graduation"
+    ],
+    "lambda_interest": 0.05,
+    "city_eta": 0.5,
+    "city_tau_km": 80.0,
+    "lambda_cls": 1.0,
+    "lambda_adv": 0.001,
+    "l2_reg": 0.0001,
+    "kappa_explicit": 0.4,
+    "trace_days": 90.0,
+    "learning_rate": 0.0003,
+    "epochs": 2,
+    "seed": 42,
+    "batch_size": 8,
+    "hist_len": 12,
+    "vocab_size": 256,
+    "max_seq_len": 8,
+    "n_protected_classes": 4,
+    "n_text_layers": 2,
+    "n_text_heads": 4,
+    "n_gcn_hops": 2,
+    "gate_epsilon": 0.05,
+    "trend_lambda": 0.03,
+    "trend_mix": 0.02,
+    "n_batches": 4,
+    "cold_start_frac": 0.1,
+    "val_holdout": 1,
+    "test_holdout": 1,
+    "min_train_events": 4,
+    "peer_delta_km": 120.0,
+    "eval_k": 20
+  },
+  "training": [
+    {
+      "epoch": 1,
+      "loss": 1.3341306746006012,
+      "bpr": 0.5681317448616028,
+      "situation_bce": 0.6900474429130554,
+      "adversary_ce": 1.4945650100708008,
+      "margin": 0.2710362672805786,
+      "gate": [
+        0.28236299753189087,
+        0.1854490041732788,
+        0.2509549856185913,
+        0.281233012676239
+      ]
+    },
+    {
+      "epoch": 2,
+      "loss": 1.321289598941803,
+      "bpr": 0.5832186937332153,
+      "situation_bce": 0.6862019896507263,
+      "adversary_ce": 1.3217095136642456,
+      "margin": 0.23798826336860657,
+      "gate": [
+        0.28700199723243713,
+        0.18798400461673737,
+        0.2524940073490143,
+        0.2725200057029724
+      ]
+    }
+  ],
+  "evaluation": {
+    "test_recall_at_k": 0.8999999761581421,
+    "test_ndcg_at_k": 0.49278753995895386,
+    "pairwise_auc": 0.9031645569620252,
+    "city_hit_rate": 0.85,
+    "cold_recall_at_k": 1.0,
+    "warm_recall_at_k": 0.8888888955116272,
+    "situation_classifier_bce": 0.6851608753204346,
+    "mean_gate": [
+      0.28097400069236755,
+      0.19725200533866882,
+      0.25223198533058167,
+      0.26954299211502075
+    ],
+    "gender_recall_at_k": {
+      "0": 1.0,
+      "1": 0.8666666666666667,
+      "2": 0.875,
+      "3": 0.9
+    },
+    "gender_recall_gap": 0.1333333333333333
+  }
+}
