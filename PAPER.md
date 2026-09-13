@@ -170,7 +170,7 @@ The fairness representation is:
 
 $$
 \mathbf{b}_i =
-\operatorname{MLP}_{fair}
+\mathrm{MLP}_{\mathrm{fair}}
 (
 \mathbf{d}_i \Vert \mathbf{p}_i
 ).
@@ -220,7 +220,7 @@ Music is treated as a first-class recommendation signal rather than an incidenta
 Let $q_m$ denote the lyrics token sequence and $\boldsymbol{\phi}_m$ the acoustic feature vector. A lightweight Transformer encodes the lyrics:
 
 $$
-\mathbf{e}_{m,lyrics} = \operatorname{MeanPool}(\operatorname{Transformer}(q_m)).
+\mathbf{e}_{m,lyrics} = \mathrm{MeanPool}(\mathrm{Transformer}(q_m)).
 $$
 
 The acoustic representation is projected into the same latent space and fused with the lyric representation:
@@ -265,11 +265,11 @@ Let each reel expose the textual sequence
 
 $$
 z_k =
-\operatorname{Caption}(r_k)
+\mathrm{Caption}(r_k)
 \Vert
-\operatorname{OCR}(r_k)
+\mathrm{OCR}(r_k)
 \Vert
-\operatorname{ASR}(r_k).
+\mathrm{ASR}(r_k).
 $$
 
 A Transformer encoder produces:
@@ -277,9 +277,9 @@ A Transformer encoder produces:
 $$
 \mathbf{e}_{k,text}
 =
-\operatorname{MeanPool}
+\mathrm{MeanPool}
 (
-\operatorname{Transformer}(z_k)
+\mathrm{Transformer}(z_k)
 ).
 $$
 
@@ -338,7 +338,7 @@ Define:
 
 $$
 \Lambda =
-\operatorname{diag}
+\mathrm{diag}
 (
 \lambda_{s_1},
 \dots,
@@ -576,7 +576,7 @@ A fixed global weight vector assumes every user depends on the same evidence. MÂ
 
 $$
 \boldsymbol{\alpha}_i = [\alpha_i,\beta_i,\gamma_i,\delta_i,\mu_i]
-=\operatorname{softmax}(\operatorname{MLP}_{gate}(\mathbf{x}_i)).
+=\mathrm{softmax}(\mathrm{MLP}_{\mathrm{gate}}(\mathbf{x}_i)).
 $$
 
 The final ranking score is:
@@ -932,7 +932,7 @@ HR@K
 \sum_{u\in\mathcal{U}}
 \mathbb{I}
 [
-\operatorname{rank}_u\le K
+\mathrm{rank}_u\le K
 ].
 $$
 
