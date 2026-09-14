@@ -1155,7 +1155,7 @@ P_{expose}(r_k)+\epsilon
 
 For a recommendation list $\mathcal{L}_i$, intra-list diversity is:
 
-```$$ILD(\mathcal{L}_i)=1-\frac{2}{|\mathcal{L}_i|\left(|\mathcal{L}_i|-1\right)}\sum_{a<b}\cos\left(\mathbf{v}_{r_a},\mathbf{v}_{r_b}\right).$$```
+$$ILD(\mathcal{L}_i)=1-\frac{2}{|\mathcal{L}_i|\left(|\mathcal{L}_i|-1\right)}\sum_{a<b}\cos\left(\mathbf{v}_{r_a},\mathbf{v}_{r_b}\right).$$
 
 The fatigue term is a ranking penalty, while diversity can also be applied as a list-level reranking constraint. This separates relevance learning from the business-policy decision of how much exploration is appropriate [7].
 
