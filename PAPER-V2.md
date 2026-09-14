@@ -2024,7 +2024,7 @@ A complete empirical study should isolate the contribution of each major signal.
 Recommended variants are:
 
 | Variant | Situation | City | Interest | Graph | Music/Playlist | Fairness gate |
-|---|---:|---:|---:|---:|---:|
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|
 | CF baseline | No | No | Yes | No | No | No |
 | + City | No | Yes | Yes | No | No | No |
 | + Situation | Yes | Yes | Yes | No | No | No |
